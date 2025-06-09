@@ -9,7 +9,6 @@ import 'package:flutter_sound_platform_interface/flutter_sound_recorder_platform
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-
 const theSource = AudioSource.microphone;
 
 // Default filter settings
@@ -115,16 +114,15 @@ class SettingsPageState extends State<SettingsPage> {
 
   Future<void> _saveSettings() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(
-        'lowCutoff', double.parse(_lowCutoffController.text));
+    await prefs.setDouble('lowCutoff', double.parse(_lowCutoffController.text));
     await prefs.setDouble(
         'highCutoff', double.parse(_highCutoffController.text));
     await prefs.setDouble(
         'noiseThreshold', double.parse(_noiseThresholdController.text));
     await prefs.setDouble(
         'windowSize', double.parse(_windowSizeController.text));
-    await prefs.setDouble('nasalanceThreshold',
-        double.parse(_nasalanceThresholdController.text));
+    await prefs.setDouble(
+        'nasalanceThreshold', double.parse(_nasalanceThresholdController.text));
     await prefs.setString('selectedMode', _selectedMode);
   }
 
@@ -159,22 +157,22 @@ class SettingsPageState extends State<SettingsPage> {
   void _clampAndCorrectValues() {
     setState(() {
       double lowCutoff =
-      (double.tryParse(_lowCutoffController.text) ?? defaultLowCutoff)
-          .clamp(minLowCutoff, maxLowCutoff);
+          (double.tryParse(_lowCutoffController.text) ?? defaultLowCutoff)
+              .clamp(minLowCutoff, maxLowCutoff);
       double highCutoff =
-      (double.tryParse(_highCutoffController.text) ?? defaultHighCutoff)
-          .clamp(minHighCutoff, maxHighCutoff);
+          (double.tryParse(_highCutoffController.text) ?? defaultHighCutoff)
+              .clamp(minHighCutoff, maxHighCutoff);
       double noiseThreshold =
-      (double.tryParse(_noiseThresholdController.text) ??
-          defaultNoiseThreshold)
-          .clamp(minNoiseThreshold, maxNoiseThreshold);
+          (double.tryParse(_noiseThresholdController.text) ??
+                  defaultNoiseThreshold)
+              .clamp(minNoiseThreshold, maxNoiseThreshold);
       double windowSize =
-      (double.tryParse(_windowSizeController.text) ?? defaultWindowSize)
-          .clamp(minWindowSize, maxWindowSize);
+          (double.tryParse(_windowSizeController.text) ?? defaultWindowSize)
+              .clamp(minWindowSize, maxWindowSize);
       double nasalanceThreshold =
-      (double.tryParse(_nasalanceThresholdController.text) ??
-          defaultNasalanceThreshold)
-          .clamp(0.0, 100.0);
+          (double.tryParse(_nasalanceThresholdController.text) ??
+                  defaultNasalanceThreshold)
+              .clamp(0.0, 100.0);
 
       // Update controllers with clamped values
       _lowCutoffController.text = lowCutoff.toString();
@@ -195,7 +193,7 @@ class SettingsPageState extends State<SettingsPage> {
     double noiseThreshold = double.parse(_noiseThresholdController.text);
     double windowSize = double.parse(_windowSizeController.text);
     double nasalanceThreshold =
-    double.parse(_nasalanceThresholdController.text);
+        double.parse(_nasalanceThresholdController.text);
 
     Navigator.push(
       context,
@@ -249,7 +247,7 @@ class SettingsPageState extends State<SettingsPage> {
                     controller: _lowCutoffController,
                     focusNode: _lowCutoffFocusNode,
                     keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                        const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: <TextInputFormatter>[
                       FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                     ],
@@ -262,7 +260,7 @@ class SettingsPageState extends State<SettingsPage> {
                     controller: _highCutoffController,
                     focusNode: _highCutoffFocusNode,
                     keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                        const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: <TextInputFormatter>[
                       FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                     ],
@@ -275,7 +273,7 @@ class SettingsPageState extends State<SettingsPage> {
                     controller: _noiseThresholdController,
                     focusNode: _noiseThresholdFocusNode,
                     keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                        const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: <TextInputFormatter>[
                       FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                     ],
@@ -288,7 +286,7 @@ class SettingsPageState extends State<SettingsPage> {
                     controller: _windowSizeController,
                     focusNode: _windowSizeFocusNode,
                     keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                        const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: <TextInputFormatter>[
                       FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                     ],
@@ -301,7 +299,7 @@ class SettingsPageState extends State<SettingsPage> {
                     controller: _nasalanceThresholdController,
                     focusNode: _nasalanceThresholdFocusNode,
                     keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                        const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: <TextInputFormatter>[
                       FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                     ],
@@ -347,7 +345,6 @@ class SettingsPageState extends State<SettingsPage> {
   }
 }
 
-
 class BandpassFilter {
   final double lowCutoff;
   final double highCutoff;
@@ -389,7 +386,7 @@ class BandpassFilter {
         coefficients[i] = 2 * (fcHigh - fcLow);
       } else {
         coefficients[i] = (sin(2 * pi * fcHigh * (i - order / 2)) -
-            sin(2 * pi * fcLow * (i - order / 2))) /
+                sin(2 * pi * fcLow * (i - order / 2))) /
             (pi * (i - order / 2));
       }
       coefficients[i] *= window[i];
@@ -509,9 +506,11 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
   FlutterSoundRecorder? _mRecorder = FlutterSoundRecorder();
   bool _mRecorderIsInited = false;
   StreamSubscription<Uint8List>? _recordingSubscription;
-  bool _isRecordingStarted = false; // A flag to indicate when actual recording starts
+  bool _isRecordingStarted =
+      false; // A flag to indicate when actual recording starts
 
-  double currentWindowSize = defaultWindowSize; // Set default window size (in seconds)
+  double currentWindowSize =
+      defaultWindowSize; // Set default window size (in seconds)
 
   // To accumulate waveform data for both channels
   List<double> accumulatedMic1Data = [];
@@ -556,10 +555,12 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
   void startRecording() async {
     if (!_mRecorderIsInited) return;
 
-    StreamController<Uint8List> recordingController = StreamController<Uint8List>();
+    StreamController<Uint8List> recordingController =
+        StreamController<Uint8List>();
     _recordingSubscription = recordingController.stream.listen((buffer) {
       if (_isRecordingStarted) {
-        _processAudioBuffer(buffer); // Process audio only after the initial delay
+        _processAudioBuffer(
+            buffer); // Process audio only after the initial delay
       }
     });
 
@@ -573,7 +574,7 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
     );
 
     // Introduce a 2-second delay before actually starting to process audio
-    await Future.delayed(Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 2));
 
     // Mark the recording as fully started
     setState(() {
@@ -615,7 +616,7 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
       );
 
       List<double> nasalanceResults =
-      calculator.calculateNasalance(filteredMic1Data, filteredMic2Data);
+          calculator.calculateNasalance(filteredMic1Data, filteredMic2Data);
 
       // Update running statistics for each window, filtering out zero values
       for (double result in nasalanceResults) {
@@ -679,8 +680,10 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
                 padding: const EdgeInsets.all(8.0),
                 child: CustomPaint(
                   painter: widget.selectedMode == 'Contour Mode'
-                      ? NasalanceGraphPainter(nasalanceData, widget.nasalanceThreshold)
-                      : NasalanceBarPainter(nasalanceData, widget.nasalanceThreshold),
+                      ? NasalanceGraphPainter(
+                          nasalanceData, widget.nasalanceThreshold)
+                      : NasalanceBarPainter(
+                          nasalanceData, widget.nasalanceThreshold),
                   child: Container(),
                 ),
               ),
@@ -700,7 +703,6 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
     );
   }
 }
-
 
 // RunningStats class for managing running statistics
 class RunningStats {
@@ -916,7 +918,8 @@ class SummaryPage extends StatelessWidget {
   final double minNasalance;
   final double standardDeviation;
 
-  const SummaryPage({super.key,
+  const SummaryPage({
+    super.key,
     required this.averageNasalance,
     required this.maxNasalance,
     required this.minNasalance,

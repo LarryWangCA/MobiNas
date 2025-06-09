@@ -1,16 +1,21 @@
-# android_mic_debug
+# nasometer
+Description: A pure dart/flutter based cross platform (Android and IOS) app
+for nasalance calculation by ysubg the flutter 'Sound' pacjage
 
-A new Flutter project.
+Usage: Install Rode Central Mobile aop and make sure the Rode Micro Ai works under the split mode before using the nasometer app
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Version:
+V1.0: 
+    Structure: 3 page offline system
+    Settings page:
+        Automatically load previous settings
+        Setting range protection
+    Display page:
+        A 2 sec delay is added to avoid abnormal data displayed when initialzing the recorder
+        Two display mode with grid and label
+    Summary page;
+        Running staticstics: final result is based on the calculation from each window
+        
+TODO: Right now the code is working under the profile mode. Check sdk / platform versions and permission configuration for final release
+    
+     
