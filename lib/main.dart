@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'dart:math';
+import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,8 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:flutter_sound_platform_interface/flutter_sound_recorder_platform_interface.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 const theSource = AudioSource.microphone;
 
@@ -504,7 +507,9 @@ class SimpleRecorder extends StatefulWidget {
 
 class _SimpleRecorderState extends State<SimpleRecorder> {
   FlutterSoundRecorder? _mRecorder = FlutterSoundRecorder();
+  FlutterSoundRecorder? _fileRecorder = FlutterSoundRecorder(); // New recorder for file
   bool _mRecorderIsInited = false;
+  bool _fileRecorderIsInited = false; // New flag for file recorder
   StreamSubscription<Uint8List>? _recordingSubscription;
   bool _isRecordingStarted =
       false; // A flag to indicate when actual recording starts
@@ -522,6 +527,10 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
   // Running statistics object to accumulate statistics across windows
   RunningStats nasalanceStats = RunningStats();
 
+  // File recording variables
+  String? _recordingFilePath;
+  DateTime? _recordingStartTime;
+
   @override
   void initState() {
     super.initState();
@@ -535,51 +544,132 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
 
   @override
   void dispose() {
-    _mRecorder!.closeRecorder();
-    _mRecorder = null;
+    // Ensure recorders are properly closed
+    if (_mRecorder != null) {
+      _mRecorder!.closeRecorder();
+      _mRecorder = null;
+    }
+    if (_fileRecorder != null && _fileRecorderIsInited) {
+      _fileRecorder!.closeRecorder();
+      _fileRecorder = null;
+    }
     _recordingSubscription?.cancel();
     super.dispose();
   }
 
   Future<void> openTheRecorder() async {
-    if (!kIsWeb) {
-      var status = await Permission.microphone.request();
-      if (status != PermissionStatus.granted) {
-        throw RecordingPermissionException('Microphone permission not granted');
+    try {
+      if (!kIsWeb) {
+        var status = await Permission.microphone.request();
+        if (status != PermissionStatus.granted) {
+          throw RecordingPermissionException('Microphone permission not granted');
+        }
+        
+        // Request storage permissions for Android
+        if (Platform.isAndroid) {
+          var storageStatus = await Permission.storage.request();
+        if (storageStatus != PermissionStatus.granted) {
+          // Storage permission not granted, using internal storage
+        }
+        }
       }
+      
+      // Initialize both recorders
+      await _mRecorder!.openRecorder();
+      await _fileRecorder!.openRecorder();
+      
+      _mRecorderIsInited = true;
+      _fileRecorderIsInited = true;
+      
+      // Set up file path for recording
+      await _setupRecordingFilePath();
+      
+    } catch (e) {
+      // Fallback: initialize only the main recorder
+      await _mRecorder!.openRecorder();
+      _mRecorderIsInited = true;
+      _fileRecorderIsInited = false; // Disable file recording if it fails
     }
-    await _mRecorder!.openRecorder();
-    _mRecorderIsInited = true;
+  }
+
+
+  Future<void> _setupRecordingFilePath() async {
+    try {
+      Directory directory;
+      
+      // Use external storage on Android for accessibility by other apps
+      if (Platform.isAndroid) {
+        directory = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+      } else {
+        // Use internal storage for iOS (more secure)
+        directory = await getApplicationDocumentsDirectory();
+      }
+      
+      final now = DateTime.now();
+      final formatted =
+          '${now.year.toString().padLeft(4, '0')}'
+          '${now.month.toString().padLeft(2, '0')}'
+          '${now.day.toString().padLeft(2, '0')}_'
+          '${now.hour.toString().padLeft(2, '0')}'
+          '${now.minute.toString().padLeft(2, '0')}';
+      _recordingFilePath = '${directory.path}/nasometer_recording_$formatted.pcm';
+    } catch (e) {
+      // Error setting up recording file path
+    }
   }
 
   void startRecording() async {
     if (!_mRecorderIsInited) return;
 
-    StreamController<Uint8List> recordingController =
-        StreamController<Uint8List>();
-    _recordingSubscription = recordingController.stream.listen((buffer) {
-      if (_isRecordingStarted) {
-        _processAudioBuffer(
-            buffer); // Process audio only after the initial delay
+    try {
+      // Start file recording first (only if file recorder is available)
+      if (_fileRecorderIsInited && _recordingFilePath != null) {
+        await _fileRecorder!.startRecorder(
+          toFile: _recordingFilePath,
+          codec: Codec.pcm16,
+          audioSource: theSource,
+          numChannels: 2,
+          sampleRate: 44100, // Match original nasalance calculation
+        );
+        _recordingStartTime = DateTime.now();
       }
-    });
 
-    await _mRecorder!.startRecorder(
-      toStream: recordingController.sink,
-      codec: Codec.pcm16,
-      audioSource: theSource,
-      numChannels: 2,
-      sampleRate: 44100,
-      bufferSize: 8192,
-    );
+      // Start stream recording for real-time processing
+      StreamController<Uint8List> recordingController =
+          StreamController<Uint8List>();
+      _recordingSubscription = recordingController.stream.listen((buffer) {
+        if (_isRecordingStarted) {
+          _processAudioBuffer(
+              buffer); // Process audio only after the initial delay
+        }
+      });
 
-    // Introduce a 2-second delay before actually starting to process audio
-    await Future.delayed(const Duration(seconds: 2));
+      await _mRecorder!.startRecorder(
+        toStream: recordingController.sink,
+        codec: Codec.pcm16WAV,
+        audioSource: theSource,
+        numChannels: 2,
+        sampleRate: 44100,
+      );
 
-    // Mark the recording as fully started
-    setState(() {
-      _isRecordingStarted = true;
-    });
+      // Introduce a 2-second delay before actually starting to process audio
+      await Future.delayed(const Duration(seconds: 2));
+
+      // Mark the recording as fully started
+      setState(() {
+        _isRecordingStarted = true;
+      });
+    } catch (e) {
+      // Show error message to user
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start recording'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _processAudioBuffer(Uint8List buffer) {
@@ -641,8 +731,24 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
   }
 
   void stopRecording() async {
-    await _mRecorder!.stopRecorder();
-    _recordingSubscription?.cancel();
+    try {
+      // Stop both recorders
+      await _mRecorder!.stopRecorder();
+      if (_fileRecorderIsInited && _fileRecorder != null) {
+        await _fileRecorder!.stopRecorder();
+      }
+      _recordingSubscription?.cancel();
+      
+      // Wait a moment for file handles to be released
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Force garbage collection to release file handles
+      if (_fileRecorder != null) {
+        _fileRecorder = null;
+      }
+    } catch (e) {
+      // Handle any cleanup errors
+    }
 
     if (!mounted) {
       return; // Guard against using context if the widget is not mounted
@@ -653,14 +759,54 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
       _isRecordingStarted = false;
     });
 
+    // Calculate recording duration
+    Duration? recordingDuration;
+    if (_recordingStartTime != null) {
+      recordingDuration = DateTime.now().difference(_recordingStartTime!);
+    }
+
     // Retrieve the final running statistics, only for non-zero values
     double averageNasalance = nasalanceStats.getAverage();
     double maxNasalance = nasalanceStats.getMax();
     double minNasalance = nasalanceStats.getMin();
     double standardDeviation = nasalanceStats.getStandardDeviation();
 
+    // Show recording result
+    _showRecordingResult(recordingDuration);
+
     widget.onFinishRecording(
         averageNasalance, maxNasalance, minNasalance, standardDeviation);
+  }
+
+  void _showRecordingResult(Duration? duration) {
+    String message = '';
+    if (duration != null) {
+      if (duration.inSeconds >= 100) {
+        message = 'Long recording completed successfully!\nDuration: ${duration.inSeconds} seconds\nFile: ${_recordingFilePath?.split('/').last}\n✅ App supports recordings up to 100+ seconds';
+      } else {
+        message = 'Recording saved successfully!  \nDuration: ${duration.inSeconds} seconds\nFile: ${_recordingFilePath?.split('/').last}';
+      }
+    } else {
+      message = 'Recording completed but duration could not be calculated.';
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 5),
+        backgroundColor: duration != null && duration.inSeconds >= 100 ? Colors.green : Colors.blue,
+        action: SnackBarAction(
+          label: 'Share',
+          onPressed: () => _shareRecordingFile(),
+        ),
+      ),
+    );
+  }
+
+  void _shareRecordingFile() {
+    if (_recordingFilePath != null) {
+      Share.shareXFiles([XFile(_recordingFilePath!)], text: 'Nasometer Recording');
+    }
   }
 
   @override

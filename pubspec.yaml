@@ -41,6 +41,8 @@ dependencies:
   audio_session: ^0.1.21
   flutter_sound_platform_interface: ^9.12.44
   shared_preferences: ^2.3.2
+  path_provider: ^2.1.2
+  share_plus: ^7.2.1
 
 dev_dependencies:
   flutter_test:
