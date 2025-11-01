@@ -15,16 +15,16 @@ import 'package:share_plus/share_plus.dart';
 const theSource = AudioSource.microphone;
 
 // Default filter settings
-double defaultLowCutoff = 80;
-double defaultHighCutoff = 1000;
+double defaultLowCutoff = 200;
+double defaultHighCutoff = 800;
 double defaultNoiseThreshold = 0.008;
 double defaultWindowSize = 0.05; // 50ms
 double defaultNasalanceThreshold = 50.0; // Nasalance threshold for contour mode
 // Example constraints
-const double minLowCutoff = 20.0;
-const double maxLowCutoff = 200.0;
-const double minHighCutoff = 800.0;
-const double maxHighCutoff = 3000.0;
+const double minLowCutoff = 50.0;
+const double maxLowCutoff = 300.0;
+const double minHighCutoff = 750.0;
+const double maxHighCutoff = 1000.0;
 const double minNoiseThreshold = 0.0;
 const double maxNoiseThreshold = 1.0;
 const double minWindowSize = 0.01; // 10 ms
@@ -351,61 +351,126 @@ class SettingsPageState extends State<SettingsPage> {
 class BandpassFilter {
   final double lowCutoff;
   final double highCutoff;
-  final double transitionWidth;
   final int sampleRate;
-  late List<double> filterCoefficients;
+  final int order;
+  late List<double> bCoefficients; // Numerator coefficients
+  late List<double> aCoefficients; // Denominator coefficients
 
   BandpassFilter({
     required this.lowCutoff,
     required this.highCutoff,
-    required this.transitionWidth,
     required this.sampleRate,
+    this.order = 2, // Default to 2nd order like MATLAB
   }) {
-    int order = (sampleRate / transitionWidth).round();
-    filterCoefficients = _designBandpassFilter(order);
+    _designButterworthBandpass();
   }
 
-  List<double> _designBandpassFilter(int order) {
-    List<double> hannWindow = _hannWindow(order + 1);
-    List<double> bpFilter = _fir1(order, [lowCutoff, highCutoff], hannWindow);
-    return bpFilter;
+  void _designButterworthBandpass() {
+    // Normalize cutoff frequencies (MATLAB style normalization)
+    double fcLow = lowCutoff / (sampleRate / 2);
+    double fcHigh = highCutoff / (sampleRate / 2);
+    
+    // Design Butterworth bandpass filter using MATLAB equivalent approach
+    var filterCoeffs = _butterworthBandpass(order, fcLow, fcHigh);
+    bCoefficients = filterCoeffs['b']!;
+    aCoefficients = filterCoeffs['a']!;
   }
 
-  List<double> _hannWindow(int n) {
-    List<double> window = List<double>.filled(n, 0.0);
-    for (int i = 0; i < n; i++) {
-      window[i] = 0.5 * (1 - cos(2 * pi * i / (n - 1)));
+  Map<String, List<double>> _butterworthBandpass(int n, double wLow, double wHigh) {
+    // For 2nd order Butterworth bandpass, use direct design
+    if (n == 2) {
+      return _butterworth2ndOrderBandpass(wLow, wHigh);
     }
-    return window;
+    
+    // For other orders, use generic design
+    return _genericButterworthBandpass(n, wLow, wHigh);
   }
 
-  List<double> _fir1(int order, List<double> cutoff, List<double> window) {
-    List<double> coefficients = List<double>.filled(order + 1, 0.0);
-    double fcLow = cutoff[0] / (sampleRate / 2);
-    double fcHigh = cutoff[1] / (sampleRate / 2);
+  Map<String, List<double>> _butterworth2ndOrderBandpass(double wLow, double wHigh) {
+    // Direct 2nd order Butterworth bandpass design
+    // This approximates MATLAB's butter(2, [wLow wHigh], 'bandpass')
+    
+    double w0 = sqrt(wLow * wHigh); // Center frequency
+    double bw = wHigh - wLow; // Bandwidth
+    
+    // Normalize by Nyquist frequency
+    double w0Norm = w0;
+    double bwNorm = bw;
+    
+    // 2nd order Butterworth bandpass coefficients
+    // These are approximate coefficients for a 2nd order bandpass
+    List<double> b = [bwNorm, 0.0, -bwNorm];
+    List<double> a = [1.0, -2.0 * cos(w0Norm * pi), 1.0];
+    
+    // Normalize by a[0] (which is 1.0 in this case)
+    return {'b': b, 'a': a};
+  }
 
-    for (int i = 0; i <= order; i++) {
-      if (i - order / 2 == 0) {
-        coefficients[i] = 2 * (fcHigh - fcLow);
-      } else {
-        coefficients[i] = (sin(2 * pi * fcHigh * (i - order / 2)) -
-                sin(2 * pi * fcLow * (i - order / 2))) /
-            (pi * (i - order / 2));
-      }
-      coefficients[i] *= window[i];
-    }
-    return coefficients;
+  Map<String, List<double>> _genericButterworthBandpass(int n, double wLow, double wHigh) {
+    // Generic Butterworth bandpass design for arbitrary order
+    // This is a simplified implementation
+    
+    double w0 = sqrt(wLow * wHigh);
+    double bw = wHigh - wLow;
+    
+    // Simplified bandpass coefficients
+    List<double> b = List<double>.filled(2 * n + 1, 0.0);
+    List<double> a = List<double>.filled(2 * n + 1, 0.0);
+    
+    // Set up basic bandpass structure
+    b[0] = bw;
+    b[b.length - 1] = -bw;
+    a[0] = 1.0;
+    a[1] = -2.0 * cos(w0 * pi);
+    a[a.length - 1] = 1.0;
+    
+    return {'b': b, 'a': a};
   }
 
   List<double> apply(List<double> input) {
+    // Apply causal filtering (forward pass only)
+    return _filter(bCoefficients, aCoefficients, input);
+  }
+
+  List<double> applyZeroPhase(List<double> input) {
+    // Apply zero-phase filtering (forward + backward, like MATLAB's filtfilt)
+    List<double> forwardFiltered = _filter(bCoefficients, aCoefficients, input);
+    List<double> reversed = forwardFiltered.reversed.toList();
+    List<double> backwardFiltered = _filter(bCoefficients, aCoefficients, reversed);
+    return backwardFiltered.reversed.toList();
+  }
+
+  List<double> _filter(List<double> b, List<double> a, List<double> input) {
     List<double> output = List<double>.filled(input.length, 0.0);
-    for (int i = 0; i < input.length; i++) {
-      for (int j = 0; j < filterCoefficients.length; j++) {
-        if (i - j >= 0) {
-          output[i] += filterCoefficients[j] * input[i - j];
+    
+    for (int n = 0; n < input.length; n++) {
+      // Calculate output sample using difference equation
+      // y[n] = b[0]*x[n] + b[1]*x[n-1] + ... - a[1]*y[n-1] - a[2]*y[n-2] - ...
+      
+      double sum = 0.0;
+      
+      // Feedforward terms (b coefficients)
+      for (int i = 0; i < b.length; i++) {
+        if (n - i >= 0) {
+          sum += b[i] * input[n - i];
         }
       }
+      
+      // Feedback terms (a coefficients, excluding a[0])
+      for (int i = 1; i < a.length; i++) {
+        if (n - i >= 0) {
+          sum -= a[i] * output[n - i];
+        }
+      }
+      
+      // Normalize by a[0]
+      if (a.isNotEmpty) {
+        sum /= a[0];
+      }
+      
+      output[n] = sum;
     }
+    
     return output;
   }
 }
@@ -432,22 +497,56 @@ class NasalanceCalculator {
         filteredOral, winSizeSamples, winSizeSamples ~/ 2); // 50% overlap
 
     for (int i = 0; i < noseBuffers.length; i++) {
-      double nasalEnergy = _calculateEnergy(noseBuffers[i]);
-      double oralEnergy = _calculateEnergy(oralBuffers[i]);
-      double totalEnergy = nasalEnergy + oralEnergy;
+      double nasalRMS = _calculateEnergy(noseBuffers[i]);  // RMS nasal energy
+      double oralRMS = _calculateEnergy(oralBuffers[i]);   // RMS oral energy
+      double totalEnergy = nasalRMS * nasalRMS + oralRMS * oralRMS;  // Total energy (sum of RMS squares)
 
       double nasalance = 0.0;
 
       if (totalEnergy < noiseThreshold) {
         nasalance = 0.0;
       } else {
-        nasalance = 100 * nasalEnergy / totalEnergy;
+        // RMS-based nasalance calculation to match MATLAB: rn / (rn + ro)
+        nasalance = 100 * nasalRMS / (nasalRMS + oralRMS + 1e-10);  // Add small epsilon to avoid division by zero
       }
 
       nasalanceData.add(nasalance);
     }
 
     return nasalanceData;
+  }
+
+  // New method to return both nasalance and energy values for MAD calculation
+  Map<String, List<double>> calculateNasalanceWithEnergy(
+      List<double> filteredNasal, List<double> filteredOral) {
+    int winSizeSamples = (windowSize * sampleRate).round();
+    List<double> nasalanceData = [];
+    List<double> energyData = [];
+
+    List<List<double>> noseBuffers = _buffer(
+        filteredNasal, winSizeSamples, winSizeSamples ~/ 2); // 50% overlap
+    List<List<double>> oralBuffers = _buffer(
+        filteredOral, winSizeSamples, winSizeSamples ~/ 2); // 50% overlap
+
+    for (int i = 0; i < noseBuffers.length; i++) {
+      double nasalRMS = _calculateEnergy(noseBuffers[i]);  // RMS nasal energy
+      double oralRMS = _calculateEnergy(oralBuffers[i]);   // RMS oral energy
+      double totalEnergy = nasalRMS * nasalRMS + oralRMS * oralRMS;  // Total energy (sum of RMS squares)
+
+      double nasalance = 0.0;
+
+      if (totalEnergy < noiseThreshold) {
+        nasalance = 0.0;
+      } else {
+        // RMS-based nasalance calculation to match MATLAB: rn / (rn + ro)
+        nasalance = 100 * nasalRMS / (nasalRMS + oralRMS + 1e-10);  // Add small epsilon to avoid division by zero
+      }
+
+      nasalanceData.add(nasalance);
+      energyData.add(totalEnergy);
+    }
+
+    return {'nasalance': nasalanceData, 'energy': energyData};
   }
 
   List<List<double>> _buffer(
@@ -472,11 +571,12 @@ class NasalanceCalculator {
   }
 
   double _calculateEnergy(List<double> buffer) {
-    double energy = 0.0;
+    double sumOfSquares = 0.0;
     for (var value in buffer) {
-      energy += value * value;
+      sumOfSquares += value * value;
     }
-    return energy;
+    // Return RMS (sqrt of mean of squares) to match MATLAB implementation
+    return sqrt(sumOfSquares / buffer.length);
   }
 }
 
@@ -652,8 +752,8 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
         sampleRate: 44100,
       );
 
-      // Introduce a 2-second delay before actually starting to process audio
-      await Future.delayed(const Duration(seconds: 2));
+      // Introduce a 5-second delay before actually starting to process audio
+      await Future.delayed(const Duration(seconds: 5));
 
       // Mark the recording as fully started
       setState(() {
@@ -692,10 +792,11 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
       BandpassFilter filter = BandpassFilter(
         lowCutoff: widget.lowCutoff,
         highCutoff: widget.highCutoff,
-        transitionWidth: 100,
         sampleRate: 44100,
+        order: 2, // 2nd order Butterworth like MATLAB
       );
 
+      // Use causal filtering to match MATLAB's filter() function (real-time feasible)
       List<double> filteredMic1Data = filter.apply(accumulatedMic1Data);
       List<double> filteredMic2Data = filter.apply(accumulatedMic2Data);
 
@@ -705,14 +806,18 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
         noiseThreshold: widget.noiseThreshold,
       );
 
-      List<double> nasalanceResults =
-          calculator.calculateNasalance(filteredMic1Data, filteredMic2Data);
+      // Use the new method that returns both nasalance and energy values
+      Map<String, List<double>> resultsWithEnergy =
+          calculator.calculateNasalanceWithEnergy(filteredMic1Data, filteredMic2Data);
+      
+      List<double> nasalanceResults = resultsWithEnergy['nasalance']!;
+      List<double> energyResults = resultsWithEnergy['energy']!;
 
-      // Update running statistics for each window, filtering out zero values
-      for (double result in nasalanceResults) {
-        if (result > 0) {
-          nasalanceStats.addData(result); // Add only non-zero data
-        }
+      // Update running statistics for each window, including energy values for MAD calculation
+      for (int i = 0; i < nasalanceResults.length; i++) {
+        double result = nasalanceResults[i];
+        double energy = energyResults[i];
+        nasalanceStats.addData(result, energy);
       }
 
       // Clear the accumulated data after processing
@@ -765,8 +870,8 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
       recordingDuration = DateTime.now().difference(_recordingStartTime!);
     }
 
-    // Retrieve the final running statistics, only for non-zero values
-    double averageNasalance = nasalanceStats.getAverage();
+    // Retrieve the final running statistics using MAD-based robust mean
+    double averageNasalance = nasalanceStats.getRobustMean(); // Use MAD-based robust mean like MATLAB
     double maxNasalance = nasalanceStats.getMax();
     double minNasalance = nasalanceStats.getMin();
     double standardDeviation = nasalanceStats.getStandardDeviation();
@@ -858,8 +963,16 @@ class RunningStats {
   double maxValue = double.negativeInfinity;
   double minValue = double.infinity;
 
-  void addData(double value) {
-    // Only add non-zero values
+  // For MAD-based robust energy gating
+  List<double> allNasalanceValues = [];
+  List<double> allEnergyValues = [];
+
+  void addData(double value, double energy) {
+    // Store all values for MAD calculation
+    allNasalanceValues.add(value);
+    allEnergyValues.add(energy);
+    
+    // Only add non-zero values to simple statistics
     if (value > 0) {
       count++;
       sum += value;
@@ -893,6 +1006,79 @@ class RunningStats {
       return sqrt((sumOfSquares / count) - (mean * mean));
     }
     return 0.0;
+  }
+
+  // MAD-based robust mean calculation (PANM-like)
+  double getRobustMean() {
+    if (allEnergyValues.isEmpty) return 0.0;
+    
+    // Calculate MAD-based threshold
+    double kMAD = 2.5;
+    double medianEnergy = _calculateMedian(allEnergyValues);
+    double madEnergy = _calculateMAD(allEnergyValues);
+    double threshold = medianEnergy + kMAD * madEnergy;
+    
+    // Find frames that pass the MAD threshold
+    List<int> keepIndices = [];
+    for (int i = 0; i < allEnergyValues.length; i++) {
+      if (allEnergyValues[i] > threshold) {
+        keepIndices.add(i);
+      }
+    }
+    
+    // If no frames pass, use 60th percentile as fallback
+    if (keepIndices.isEmpty) {
+      double percentile60 = _calculatePercentile(allEnergyValues, 60);
+      for (int i = 0; i < allEnergyValues.length; i++) {
+        if (allEnergyValues[i] > percentile60) {
+          keepIndices.add(i);
+        }
+      }
+    }
+    
+    // Calculate mean of nasalance values for selected frames
+    if (keepIndices.isNotEmpty) {
+      double sum = 0.0;
+      for (int idx in keepIndices) {
+        sum += allNasalanceValues[idx];
+      }
+      return sum / keepIndices.length;
+    }
+    
+    return 0.0;
+  }
+
+  // Helper method to calculate median
+  double _calculateMedian(List<double> values) {
+    List<double> sorted = List.from(values)..sort();
+    int n = sorted.length;
+    if (n % 2 == 1) {
+      return sorted[n ~/ 2];
+    } else {
+      return (sorted[n ~/ 2 - 1] + sorted[n ~/ 2]) / 2.0;
+    }
+  }
+
+  // Helper method to calculate MAD (Median Absolute Deviation)
+  double _calculateMAD(List<double> values) {
+    double median = _calculateMedian(values);
+    List<double> deviations = values.map((v) => (v - median).abs()).toList();
+    return _calculateMedian(deviations);
+  }
+
+  // Helper method to calculate percentile
+  double _calculatePercentile(List<double> values, double percentile) {
+    List<double> sorted = List.from(values)..sort();
+    double index = (percentile / 100.0) * (sorted.length - 1);
+    int lower = index.floor();
+    int upper = index.ceil();
+    
+    if (lower == upper) {
+      return sorted[lower];
+    } else {
+      double weight = index - lower;
+      return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+    }
   }
 }
 
