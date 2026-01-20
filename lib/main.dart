@@ -209,7 +209,7 @@ class SettingsPageState extends State<SettingsPage> {
           nasalanceThreshold: nasalanceThreshold,
           selectedMode: _selectedMode, // Pass the selected mode to the recorder
           onFinishRecording: (averageNasalance, maxNasalance, minNasalance,
-              standardDeviation) {
+              standardDeviation, filePath) {
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
@@ -218,6 +218,7 @@ class SettingsPageState extends State<SettingsPage> {
                   maxNasalance: maxNasalance,
                   minNasalance: minNasalance,
                   standardDeviation: standardDeviation,
+                  recordingFilePath: filePath,
                 ),
               ),
             );
@@ -588,7 +589,7 @@ class SimpleRecorder extends StatefulWidget {
   final double nasalanceThreshold;
   final String selectedMode;
   final Function(double averageNasalance, double maxNasalance,
-      double minNasalance, double standardDeviation) onFinishRecording;
+      double minNasalance, double standardDeviation, String? filePath) onFinishRecording;
 
   const SimpleRecorder({
     super.key,
@@ -876,11 +877,11 @@ class _SimpleRecorderState extends State<SimpleRecorder> {
     double minNasalance = nasalanceStats.getMin();
     double standardDeviation = nasalanceStats.getStandardDeviation();
 
-    // Show recording result
-    _showRecordingResult(recordingDuration);
+    // Don't show recording result here anymore - let the user decide in SummaryPage
+    // _showRecordingResult(recordingDuration);
 
     widget.onFinishRecording(
-        averageNasalance, maxNasalance, minNasalance, standardDeviation);
+        averageNasalance, maxNasalance, minNasalance, standardDeviation, _recordingFilePath);
   }
 
   void _showRecordingResult(Duration? duration) {
@@ -1018,10 +1019,10 @@ class RunningStats {
     double madEnergy = _calculateMAD(allEnergyValues);
     double threshold = medianEnergy + kMAD * madEnergy;
     
-    // Find frames that pass the MAD threshold
+    // Find frames that pass the MAD threshold and have non-zero nasalance
     List<int> keepIndices = [];
     for (int i = 0; i < allEnergyValues.length; i++) {
-      if (allEnergyValues[i] > threshold) {
+      if (allEnergyValues[i] > threshold && allNasalanceValues[i] > 0) {
         keepIndices.add(i);
       }
     }
@@ -1030,7 +1031,7 @@ class RunningStats {
     if (keepIndices.isEmpty) {
       double percentile60 = _calculatePercentile(allEnergyValues, 60);
       for (int i = 0; i < allEnergyValues.length; i++) {
-        if (allEnergyValues[i] > percentile60) {
+        if (allEnergyValues[i] > percentile60 && allNasalanceValues[i] > 0) {
           keepIndices.add(i);
         }
       }
@@ -1042,10 +1043,20 @@ class RunningStats {
       for (int idx in keepIndices) {
         sum += allNasalanceValues[idx];
       }
-      return sum / keepIndices.length;
+      double robustMean = sum / keepIndices.length;
+      
+      // Ensure robust mean is within min-max bounds
+      double minVal = getMin();
+      double maxVal = getMax();
+      if (minVal > 0 && maxVal > 0) {
+        robustMean = robustMean.clamp(minVal, maxVal);
+      }
+      
+      return robustMean;
     }
     
-    return 0.0;
+    // If still no valid frames, return regular average of non-zero values
+    return getAverage();
   }
 
   // Helper method to calculate median
@@ -1244,11 +1255,12 @@ class NasalanceBarPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-class SummaryPage extends StatelessWidget {
+class SummaryPage extends StatefulWidget {
   final double averageNasalance;
   final double maxNasalance;
   final double minNasalance;
   final double standardDeviation;
+  final String? recordingFilePath;
 
   const SummaryPage({
     super.key,
@@ -1256,7 +1268,80 @@ class SummaryPage extends StatelessWidget {
     required this.maxNasalance,
     required this.minNasalance,
     required this.standardDeviation,
+    required this.recordingFilePath,
   });
+
+  @override
+  State<SummaryPage> createState() => _SummaryPageState();
+}
+
+class _SummaryPageState extends State<SummaryPage> {
+  bool _fileSaved = false;
+  late TextEditingController _fileNameController;
+  late String _originalFileName;
+  late String _directoryPath;
+
+  @override
+  void initState() {
+    super.initState();
+    // Extract original filename and directory from full path
+    if (widget.recordingFilePath != null) {
+      String fullPath = widget.recordingFilePath!;
+      _directoryPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
+      _originalFileName = fullPath.substring(fullPath.lastIndexOf('/') + 1);
+      // Remove extension for editing
+      _originalFileName = _originalFileName.replaceAll('.pcm', '');
+      _fileNameController = TextEditingController(text: _originalFileName);
+    } else {
+      _originalFileName = 'nasometer_recording';
+      _directoryPath = '';
+      _fileNameController = TextEditingController(text: _originalFileName);
+    }
+  }
+
+  @override
+  void dispose() {
+    _fileNameController.dispose();
+    super.dispose();
+  }
+
+  void _deleteRecording() async {
+    if (widget.recordingFilePath != null) {
+      try {
+        File file = File(widget.recordingFilePath!);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (e) {
+        // Error deleting file
+      }
+    }
+  }
+
+  Future<void> _renameRecordingFile() async {
+    if (widget.recordingFilePath != null) {
+      try {
+        String newFileName = _fileNameController.text.trim();
+        // Use original filename if user didn't provide one
+        if (newFileName.isEmpty) {
+          newFileName = _originalFileName;
+        }
+        // Ensure we have .pcm extension
+        if (!newFileName.endsWith('.pcm')) {
+          newFileName += '.pcm';
+        }
+        
+        String newFilePath = '$_directoryPath/$newFileName';
+        File oldFile = File(widget.recordingFilePath!);
+        
+        if (await oldFile.exists()) {
+          await oldFile.rename(newFilePath);
+        }
+      } catch (e) {
+        // Error renaming file
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1272,27 +1357,105 @@ class SummaryPage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Average Nasalance: ${averageNasalance.toStringAsFixed(2)}%',
+                'Average Nasalance: ${widget.averageNasalance.toStringAsFixed(2)}%',
                 style: const TextStyle(fontSize: 20),
               ),
               Text(
-                'Max Nasalance: ${maxNasalance.toStringAsFixed(2)}%',
+                'Max Nasalance: ${widget.maxNasalance.toStringAsFixed(2)}%',
                 style: const TextStyle(fontSize: 20),
               ),
               Text(
-                'Min Nasalance: ${minNasalance.toStringAsFixed(2)}%',
+                'Min Nasalance: ${widget.minNasalance.toStringAsFixed(2)}%',
                 style: const TextStyle(fontSize: 20),
               ),
               Text(
-                'Standard Deviation: ${standardDeviation.toStringAsFixed(2)}',
+                'Standard Deviation: ${widget.standardDeviation.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 20),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 30),
+              if (!_fileSaved) ...[
+                const Text(
+                  'Choose what to do with the recording:',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _fileNameController,
+                  decoration: const InputDecoration(
+                    labelText: 'File Name (optional)',
+                    hintText: 'Leave empty to use default name',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  textInputAction: TextInputAction.done,
+                ),
+                const SizedBox(height: 20),
+                Center(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          // Determine the final filename
+                          String finalFileName = _fileNameController.text.trim();
+                          if (finalFileName.isEmpty) {
+                            finalFileName = _originalFileName;
+                          }
+                          if (!finalFileName.endsWith('.pcm')) {
+                            finalFileName += '.pcm';
+                          }
+                          
+                          await _renameRecordingFile();
+                          setState(() {
+                            _fileSaved = true;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Recording saved as: $finalFileName'),
+                              backgroundColor: Colors.green,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.save),
+                        label: const Text('Save Recording'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        ),
+                      ),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          _deleteRecording();
+                          setState(() {
+                            _fileSaved = true;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Recording discarded'),
+                              backgroundColor: Colors.orange,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Discard'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 30),
               Center(
                 child: ElevatedButton(
                   onPressed: () {
-                    Navigator.pop(
-                        context); // Navigate back to the settings page
+                    Navigator.pop(context); // Navigate back to the settings page
                   },
                   child: const Text('Back to Settings'),
                 ),
